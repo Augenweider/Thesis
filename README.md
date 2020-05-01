@@ -1,2 +1,2 @@
 # Thesis
-The Bachelor Thesis
+My Bachelor Thesis
