@@ -1,14 +1,16 @@
 import sys
 import random
+import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from sklearn import metrics
+from sklearn.metrics.pairwise import cosine_similarity
 import math
 from random import sample
 from em_algo import em_algo
 
 
-def leave_one_out(initial_theta, observations, type):
+def leave_one_participant_out(initial_theta, observations, type):
     """
     This function uses leava one out cross validation to split the train set and the test set
     calculating the goodness-of-fit for the trained model, then stores the trained
@@ -25,17 +27,19 @@ def leave_one_out(initial_theta, observations, type):
     """
     # Leave one participant out
     metric = {}
-    n = 1
-    for group, data in observations:
-        # Set number of rows and colomns of subplots
-        plt.figure()
-        for i in range(len(observations)):
-            if n <= 30:
-                plt.subplot(5, 6, n)
-                n += 1
-            else:
-                n = 1
-            train_set = observations[:i - 1] + observations[i:]
+    roc_fpr = []
+    roc_tpr = []
+    labels = []
+    average_precision = {}
+    average_accuracy = {}
+    average_recall = {}
+    groups = list(observations.keys())
+    for group, data in observations.items():
+        precisions = []
+        accuracies = []
+        recalls = []
+        for i in range(len(data)):
+            train_set = data[:i - 1] + data[i:]
             # Training
             theory = em_algo(initial_theta, train_set)
             trained_parameters = theory.run()
@@ -48,59 +52,204 @@ def leave_one_out(initial_theta, observations, type):
                 probs = model_theory(trained_parameters[0],
                                      trained_parameters[1],
                                      trained_parameters[2])
-            leave, prediction = metrics(observations[i], probs, type)
+            leave, prediction, label = metrics_function(data[i], probs, type)
+            labels = label
             # print metrics of the results
             metric[str(trained_parameters)] = metrics.classification_report(leave, prediction, digits=3)
             # confusion matrix
+            print(metrics.classification_report(leave, prediction, digits=3))
             conf_mat = metrics.confusion_matrix(leave, prediction)
 
-            fpr = {}
-            tpr = {}
-            for i, row in conf_mat:
+            fpr = []
+            tpr = []
+            accuracy = []
+            precision = []
+            recall = []
+            for i, row in enumerate(conf_mat):
                 positive = 0
                 fp = 0
                 tp = 0
-                for j, element in row:
+                tn = 0
+                fn = 0
+                for j, element in enumerate(row):
                     positive += element
-                    if i == element:
+                    if i == j:
                         tp += element
                     else:
-                        fp += element
-                fpr[i] = fp / positive
-                tpr[i] = tp / positive
+                        fn += element
+                fp = sum(list(conf_mat[:i, i]) + list(conf_mat[i + 1:, i]))
+                tn_list = list(conf_mat[:i, :i]) + list(conf_mat[i + 1:, i + 1:])
+                for i in tn_list:
+                    tn += sum(i)
+                fpr.append(fp / (fp + tn))
+                tpr.append(tp / (tp + fn))
+                acc = (tp + tn) / (tp + tn + fp + fn)
+                prec = tp / (tp + fp)
+                rec = tp / (tp + fn)
+                if not math.isnan(acc):
+                    accuracy.append(acc)
+                else:
+                    accuracy.append(0.0)
+                if not math.isnan(prec):
+                    precision.append(prec)
+                else:
+                    precision.append(0.0)
+                if not math.isnan(rec):
+                    recall.append(rec)
+                else:
+                    recall.append(0.0)
 
-            # plot the figure of roc_curve
-            for i in range(len(probs)):
-                plt.plot(fpr[i], tpr[i], label='ROC curve (area = {0:0.2f})')
-            plt.plot([0, 1], [0, 1], 'k--', lw=lw)
-            plt.xlim([0.0, 1.0])
-            plt.ylim([0.0, 1.05])
-            plt.xlabel('False Positive Rate')
-            plt.ylabel('True Positive Rate')
-            plt.title('ROC curve of all selection [%s]' % group)
-            plt.legend(loc="lower right")
+        precisions.append(precision)
+        accuracies.append(accuracy)
+        recalls.append(recall)
+
+        average_precision[group] = [round(sum(np.array(precisions)[:, i]) / len(precisions), 2) for i in range(len(precision))]
+        average_accuracy[group] = [round(sum(np.array(accuracies)[:, i]) / len(accuracies), 2) for i in range(len(accuracy))]
+        average_recall[group] = [round(sum(np.array(recalls)[:, i]) / len(recalls), 2) for i in range(len(recall))]
+
+    plt.figure()
+    for g in groups:
+        plt.plot(labels, average_precision[g], label=("%s" % g))
+    plt.xlabel("patterns")
+    plt.ylabel("average precision")
+    plt.legend(loc="lower right")
+    plt.figure()
+    for g in groups:
+        plt.plot(labels, average_recall[g], label="%s" % g)
+    plt.xlabel("patterns")
+    plt.ylabel("average recall")
+    plt.legend(loc="lower right")
+    plt.figure()
+    for g in groups:
+        plt.plot(labels, average_accuracy[g], label="%s" % g)
+    plt.xlabel("patterns")
+    plt.ylabel("average accuracy")
+    plt.legend(loc="lower right")
 
     plt.show()
 
 
+
+def leave_one_experiment_out(initial_theta, observations, type):
     # Leave one experiment out
-    g_2 = {}
-    for i in range(len(observations)):
-        # Select one sample as the test set.
-        test_set = observations[i]
-        # Others is regarded as the train set.
-        train_set = observations[:i - 1] + observations[i:]
-        # Training
-        theory = em_algo(initial_theta, train_set)
-        trained_parameters = theory.run()
+    g_tests = {}
+    cos = {}
+    root_mean_squared_error = {}
+    for group, data in observations.items():
+        g_2 = 0
+        cos_sim = 0
+        rmse = 0
+        scores = {}
+        for i, observation in enumerate(data):
+            score = 0
+            leave_one = data[i]
+            others = data[:i] + data[i + 1:]
+            for experiment in others:
+                score += similarity(leave_one, experiment)
+            scores[i] = score
 
-        # Calculate the G-test statistic.
-        result = calculate_g_2(trained_parameters, test_set, type)
-        g_2[str(trained_parameters)] = result
-    return g_2
+        # Select 10 experiments with the highest similarity
+        score_list = sorted(list(scores.values()), reverse=True)
+        chosen_scores = score_list[:10]
+        chosen_expers = []
+        for s in chosen_scores:
+            for key, value in scores.items():
+                if value == s:
+                    chosen_expers.append(key)
+
+        for i in chosen_expers:
+            # Select one sample as the test set.
+            test_set = data[i]
+            # Others is regarded as the train set.
+            train_set = data[:i - 1] + data[i:]
+            # Training
+            theory = em_algo(initial_theta, train_set)
+            trained_parameters = theory.run()
+            if type == "-i":
+                probs = inference_model(
+                    trained_parameters[0], trained_parameters[1],
+                    trained_parameters[2], trained_parameters[3],
+                    trained_parameters[4])
+            else:
+                probs = model_theory(trained_parameters[0],
+                                     trained_parameters[1],
+                                     trained_parameters[2])
+            # Calculate the G-test statistic.
+            result = calculate_g_2(trained_parameters, test_set, type)
+            g_2 += result
+            # Calculate Cosine similarity
+            distribution = [x / sum(test_set) for x in test_set]
+            dot_product = 0
+            for i in range(len(probs)):
+                dot_product += probs[i] * distribution[i]
+
+            # Calculate the magnitude of the experiment
+            magnitude1 = math.sqrt(sum([i**2 for i in probs]))
+            magnitude2 = math.sqrt(sum([i**2 for i in distribution]))
+            cos_sim += dot_product / (magnitude1 * magnitude2)
+            # Calculate RMSE
+            rmse += metrics.mean_squared_error(probs, distribution, squared=False)
+
+        g_2 = round(g_2 / 10, 3)
+        cos_sim = round(cos_sim / 10, 3)
+        rmse = round(rmse / 10, 3)
+        g_tests[group] = g_2
+        cos[group] = cos_sim
+        root_mean_squared_error[group] = rmse
+
+    print(g_tests)
+    print(cos)
+    print(root_mean_squared_error)
 
 
-def metrics(experiment, probs, type):
+
+
+
+def similarity(experiment1, experiment2):
+    """
+    Return a score that represents the distribution similarity of both experiments
+    The similarity is computed by the cosine similarity and a bias value.
+
+    Parameters:
+        experiment1(list): The list contains the number of participants of each patterns in a experiment
+        experiment2(list): The list contains the number of participants of each patterns in a experiment
+    """
+    # Calculate the dot produt of both experimental distribution
+    dot_product = 0
+    for i in range(len(experiment1)):
+        dot_product += experiment1[i] * experiment2[i]
+
+    # Calculate the magnitude of the experiment
+    magnitude1 = math.sqrt(sum([i**2 for i in experiment1]))
+    magnitude2 = math.sqrt(sum([i**2 for i in experiment2]))
+
+    cos = dot_product / magnitude1 * magnitude2
+
+    # Calculate the bias value using the difference of sums
+    # of participant numbers of both experiments
+    sum1 = sum(experiment1)
+    sum2 = sum(experiment2)
+    if sum1 >= sum2:
+        diff = sum2 - sum1
+    else:
+        diff = sum1 - sum2
+
+    # If the difference is 20, the bias value is 0.
+    # If the difference is larger than 20, the bias value is negative.
+    # If the difference is smaller than 20, the bias value is positive.
+    if diff != 0:
+        domain = abs(diff) / 20
+        bias = - math.log(domain)
+    else:
+        bias = 30
+    # Compute the sum between cosine similarity multiplying by 100 and bias
+    # the higher cosine similarity the experiment has, the higher score it gets
+    # the lower bias value the experiment has, the higher score it obtains
+    score = cos * 100 + bias
+    return score
+
+
+def metrics_function(experiment, probs, type):
     prediction = []
     leave = []
     result = {}
@@ -127,19 +276,20 @@ def metrics(experiment, probs, type):
 
     else:
         result[0] = "1000"
-        result[1] = "1010"
-        result[2] = "1001"
+        result[1] = "1001"
+        result[2] = "1010"
         result[3] = "1011"
 
     for index, number in enumerate(experiment):
-        leave += result[index] * number
-
         for i in range(number):
-            for i, prob in enumerate(probs):
-                if random.random() < prob:
-                    prediction += result[i]
+            leave.append(result[index])
 
-    return leave, prediction
+    p = np.array(probs)
+    for i in range(len(leave)):
+        prediction.append(result[np.random.choice([int(x) for x in range(len(result))], p = p.ravel())])
+
+
+    return leave, prediction, list(result.values())
 
 
 
@@ -159,37 +309,65 @@ def bootstrap(initial_theta, observations, type):
         the goodness-of-fit(values) of that.
     """
     g_2 = {}
-    # Operating 10 times
-    n = 10
-    length = len(observations)
-    while n > 0:
-        train_set = []
-        # Choose the training samples with replacements
-        for i in range(length):
-            train_set.append([x for x in sample(observations, 1)[0]])
-        temp = train_set
-        # All other samples not be chosen is in the train set.
-        for train in train_set:
-            i = temp.index(train)
-            test_set = temp[:i - 1] + temp[i:]
-            temp = test_set
-        # Training
-        theory = em_algo(initial_theta, train_set)
-        trained_parameters = theory.run()
-        # Computing the standard deviation.
+    rmse = {}
+    cos_sim = {}
+    # Choose the training samples with replacements
+    for group, data in observations.items():
+        n = 0
+        test_num = 0
+        root_mean_squared_error = 0
+        cos = 0
         mean_of_g_2 = 0
-        var_of_g_2 = 0
-        for test in test_set:
-            mean_of_g_2 += (1 / len(test_set)) * \
-                calculate_g_2(trained_parameters, test, type)
-        for test in test_set:
-            var_of_g_2 += (1 / len(test_set)) * \
-                ((calculate_g_2(trained_parameters, test, type) - mean_of_g_2) ** 2)
-        g_2[str(trained_parameters)] = (
-            round(mean_of_g_2, 2), round(math.sqrt(var_of_g_2), 2))
-        n -= 1
+        while n < 10:
+            n += 1
+            train_set = []
+            length = len(data)
+            for i in range(length):
+                train_set.append([x for x in sample(data, 1)[0]])
+            temp = train_set
+            # All other samples not be chosen is in the train set.
+            for train in train_set:
+                i = temp.index(train)
+                test_set = temp[:i - 1] + temp[i:]
+                temp = test_set
+            test_num += len(test_set)
+            # Training
+            theory = em_algo(initial_theta, train_set)
+            trained_parameters = theory.run()
+            if type == "-i":
+                probs = inference_model(
+                    trained_parameters[0], trained_parameters[1],
+                    trained_parameters[2], trained_parameters[3],
+                    trained_parameters[4])
+            else:
+                probs = model_theory(trained_parameters[0],
+                                     trained_parameters[1],
+                                     trained_parameters[2])
+            # Computing g2
+            for test in test_set:
+                mean_of_g_2 += calculate_g_2(trained_parameters, test, type)
+                mean_of_g_2 = round(mean_of_g_2, 3)
+            # Compute rmse and Cosine Similarity
+            for test in test_set:
+                distribution = [x / sum(test) for x in test]
+                dot_product = 0
+                for i in range(len(probs)):
+                    dot_product += probs[i] * distribution[i]
 
-    return g_2
+                # Calculate the magnitude of the experiment
+                magnitude1 = math.sqrt(sum([i**2 for i in probs]))
+                magnitude2 = math.sqrt(sum([i**2 for i in distribution]))
+                cos += dot_product / (magnitude1 * magnitude2)
+                root_mean_squared_error += metrics.mean_squared_error(probs, distribution, squared=False)
+        root_mean_squared_error = round(root_mean_squared_error / test_num, 3)
+        cos = round(cos / test_num, 3)
+        rmse[group] = round(root_mean_squared_error, 3)
+        cos_sim[group] = round(cos, 3)
+        g_2[group] = round(mean_of_g_2 / test_num, 3)
+    print(g_2)
+    print(cos_sim)
+    print(rmse)
+
 
 
 def calculate_g_2(params, test, type):
@@ -235,7 +413,7 @@ def inference_model(c, d, x, s, i):
     p_0011 = (1 - c) * (1 - x) * (1 - d) * i
     probs.append(p_0011)
     # 0100
-    p_0101 = (1 - c) * x * (1 - s) * i
+    p_0101 = c * d * (1 - s) * i
     probs.append(p_0101)
     # 0101
     p_0101 = (1 - c) * x * (1 - s) * i
@@ -310,6 +488,7 @@ optional arguments:
   -m, --the model theory with three parameters""")
         exit(0)
     initial_theta = []
+    obs = {}
     for parameter in sys.argv[2:]:
         initial_theta.append(float(parameter))
     if sys.argv[1] == "-i":
@@ -319,8 +498,8 @@ optional arguments:
         obs["deontic"] = observations[observations["Content"] == "deontic"]
         obs["generalization"] = observations[observations["Content"] == "generalization"]
         for key, value in obs.items():
-            obs[key] = obs[value].iloc[:, -16:].astype('int') + 1
-            obs[key] = obs[value].values.tolist()
+            obs[key] = value.iloc[:, -16:].astype('int') + 1
+            obs[key] = obs[key].values.tolist()
     elif sys.argv[1] == "-m":
         file = pd.ExcelFile('Studies4patterns.xlsx')
         observations = pd.read_excel(file)
@@ -328,28 +507,8 @@ optional arguments:
         obs["deontic"] = observations[observations["Content"] == "deontic"]
         obs["generalization"] = observations[observations["Content"] == "generalization"]
         for key, value in obs.items():
-            obs[key] = obs[value].iloc[:, -5:-1].astype('int') + 1
-            obs[key] = obs[value].values.tolist()
-
-    result1 = leave_one_out(initial_theta, observations, sys.argv[1])
-    result2 = bootstrap(initial_theta, observations, sys.argv[1])
-
-    data1 = []
-    for (key, value) in result1.items():
-        data1.append(eval(key) + [value])
-    data2 = []
-    for (key, value) in result2.items():
-        data2.append(eval(key) + [value])
-    if sys.argv[1] == '-i':
-        df_loo = pd.DataFrame(data1, columns=[
-                              'theta_c', 'theta_d', 'theta_x', 'theta_s', 'theta_i', 'goodness_of_fit'])
-        df_boo = pd.DataFrame(data2, columns=[
-                              'theta_c', 'theta_d', 'theta_x', 'theta_s', 'theta_i', 'goodness_of_fit(mean, SD)'])
-    elif sys.argv[1] == '-m':
-        df_loo = pd.DataFrame(
-            data1, columns=['theta_c', 'theta_e', 'theta_f', 'goodness_of_fit'])
-        df_boo = pd.DataFrame(
-            data2, columns=['theta_c', 'theta_e', 'theta_f', 'goodness_of_fit(mean, SD)'])
-
-    print(df_loo.to_latex(index=False))
-    print(df_boo.to_latex(index=False))
+            obs[key] = value.iloc[:, -5:-1].astype('int') + 1
+            obs[key] = obs[key].values.tolist()
+    leave_one_participant_out(initial_theta, obs, sys.argv[1])
+    leave_one_experiment_out(initial_theta, obs, sys.argv[1])
+    bootstrap(initial_theta, obs, sys.argv[1])
