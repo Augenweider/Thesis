@@ -30,14 +30,15 @@ def leave_one_participant_out(initial_theta, observations, type):
     roc_fpr = []
     roc_tpr = []
     labels = []
-    average_precision = {}
-    average_accuracy = {}
-    average_recall = {}
+    precisions = {}
+    accuracies = {}
+    recalls = {}
     groups = list(observations.keys())
     for group, data in observations.items():
-        precisions = []
-        accuracies = []
-        recalls = []
+        conf_matrix = 0
+        accuracy = []
+        precision = []
+        recall = []
         for i in range(len(data)):
             train_set = data[:i - 1] + data[i:]
             # Training
@@ -57,74 +58,62 @@ def leave_one_participant_out(initial_theta, observations, type):
             # print metrics of the results
             metric[str(trained_parameters)] = metrics.classification_report(leave, prediction, digits=3)
             # confusion matrix
-            print(metrics.classification_report(leave, prediction, digits=3))
             conf_mat = metrics.confusion_matrix(leave, prediction)
-
-            fpr = []
-            tpr = []
-            accuracy = []
-            precision = []
-            recall = []
-            for i, row in enumerate(conf_mat):
-                positive = 0
-                fp = 0
-                tp = 0
-                tn = 0
-                fn = 0
-                for j, element in enumerate(row):
-                    positive += element
-                    if i == j:
-                        tp += element
-                    else:
-                        fn += element
-                fp = sum(list(conf_mat[:i, i]) + list(conf_mat[i + 1:, i]))
-                tn_list = list(conf_mat[:i, :i]) + list(conf_mat[i + 1:, i + 1:])
-                for i in tn_list:
-                    tn += sum(i)
-                fpr.append(fp / (fp + tn))
-                tpr.append(tp / (tp + fn))
-                acc = (tp + tn) / (tp + tn + fp + fn)
-                prec = tp / (tp + fp)
-                rec = tp / (tp + fn)
-                if not math.isnan(acc):
-                    accuracy.append(acc)
+            conf_matrix += conf_mat
+        print(conf_matrix)
+        for i, row in enumerate(conf_matrix):
+            fp = 0
+            tp = 0
+            tn = 0
+            fn = 0
+            for j, element in enumerate(row):
+                if i == j:
+                    tp += element
                 else:
-                    accuracy.append(0.0)
-                if not math.isnan(prec):
-                    precision.append(prec)
-                else:
-                    precision.append(0.0)
-                if not math.isnan(rec):
-                    recall.append(rec)
-                else:
-                    recall.append(0.0)
-
-        precisions.append(precision)
-        accuracies.append(accuracy)
-        recalls.append(recall)
-
-        average_precision[group] = [round(sum(np.array(precisions)[:, i]) / len(precisions), 2) for i in range(len(precision))]
-        average_accuracy[group] = [round(sum(np.array(accuracies)[:, i]) / len(accuracies), 2) for i in range(len(accuracy))]
-        average_recall[group] = [round(sum(np.array(recalls)[:, i]) / len(recalls), 2) for i in range(len(recall))]
-
+                    fn += element
+            fp = sum(list(conf_matrix[:i, i]) + list(conf_matrix[i + 1:, i]))
+            tn_list = list(conf_matrix[:i, :i]) + list(conf_matrix[i + 1:, i + 1:])
+            for t in tn_list:
+                tn += sum(t)
+            acc = (tp + tn) / (tp + tn + fp + fn)
+            prec = tp / (tp + fp)
+            rec = tp / (tp + fn)
+            if not math.isnan(acc):
+                accuracy.append(acc)
+            else:
+                accuracy.append(0.0)
+            if not math.isnan(prec):
+                precision.append(prec)
+            else:
+                precision.append(0.0)
+            if not math.isnan(rec):
+                recall.append(rec)
+            else:
+                recall.append(0.0)
+        accuracies[group] = accuracy
+        precisions[group] = precision
+        recalls[group] = recall
     plt.figure()
     for g in groups:
-        plt.plot(labels, average_precision[g], label=("%s" % g))
+        plt.plot(labels, precisions[g], label=("%s" % g))
     plt.xlabel("patterns")
     plt.ylabel("average precision")
+    plt.ylim(0, 1)
     plt.legend(loc="lower right")
     plt.figure()
     for g in groups:
-        plt.plot(labels, average_recall[g], label="%s" % g)
+        plt.plot(labels, recalls[g], label="%s" % g)
     plt.xlabel("patterns")
     plt.ylabel("average recall")
     plt.legend(loc="lower right")
+    plt.ylim(0, 1)
     plt.figure()
     for g in groups:
-        plt.plot(labels, average_accuracy[g], label="%s" % g)
+        plt.plot(labels, accuracies[g], label="%s" % g)
     plt.xlabel("patterns")
     plt.ylabel("average accuracy")
     plt.legend(loc="lower right")
+    plt.ylim(0, 1)
 
     plt.show()
 
@@ -197,9 +186,7 @@ def leave_one_experiment_out(initial_theta, observations, type):
         cos[group] = cos_sim
         root_mean_squared_error[group] = rmse
 
-    print(g_tests)
-    print(cos)
-    print(root_mean_squared_error)
+    return g_tests, cos, root_mean_squared_error
 
 
 
@@ -364,9 +351,8 @@ def bootstrap(initial_theta, observations, type):
         rmse[group] = round(root_mean_squared_error, 3)
         cos_sim[group] = round(cos, 3)
         g_2[group] = round(mean_of_g_2 / test_num, 3)
-    print(g_2)
-    print(cos_sim)
-    print(rmse)
+
+    return g_2, cos_sim, rmse
 
 
 
@@ -510,5 +496,29 @@ optional arguments:
             obs[key] = value.iloc[:, -5:-1].astype('int') + 1
             obs[key] = obs[key].values.tolist()
     leave_one_participant_out(initial_theta, obs, sys.argv[1])
-    leave_one_experiment_out(initial_theta, obs, sys.argv[1])
-    bootstrap(initial_theta, obs, sys.argv[1])
+    g_2_loo, cos_min_loo, rmse_loo = leave_one_experiment_out(initial_theta, obs, sys.argv[1])
+    g_2_bootstrap, cos_min_bootstrap, rmse_bootstrap = bootstrap(initial_theta, obs, sys.argv[1])
+    groups = list(g_2_loo.keys())
+    plt.figure()
+    plt.plot(groups, list(g_2_loo.values()), label="loo-g2")
+    plt.plot(groups, list(g_2_bootstrap.values()), label="bootstrap-g2")
+    plt.xlabel("groups")
+    plt.ylabel("G test statistic")
+    plt.ylim(0, 400)
+    plt.legend(loc="upper right")
+    plt.figure()
+    plt.plot(groups, list(cos_min_loo.values()), label="loo-cosine similarity")
+    plt.plot(groups, list(cos_min_bootstrap.values()), label="bootstrap-cosine similarity")
+    plt.xlabel("groups")
+    plt.ylabel("cosine similarity")
+    plt.ylim(0, 1)
+    plt.legend(loc="lower right")
+    plt.figure()
+    plt.plot(groups, list(rmse_loo.values()), label="loo-rmse")
+    plt.plot(groups, list(rmse_bootstrap.values()), label="bootstrap-rmse")
+    plt.xlabel("groups")
+    plt.ylabel("RMSE")
+    plt.ylim(0, 0.5)
+    plt.legend(loc="lower right")
+
+    # plt.show()
