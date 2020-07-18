@@ -56,11 +56,11 @@ def leave_one_participant_out(initial_theta, observations, type):
             leave, prediction, label = metrics_function(data[i], probs, type)
             labels = label
             # print metrics of the results
-            metric[str(trained_parameters)] = metrics.classification_report(leave, prediction, digits=3)
+            # a = metrics.classification_report(leave, prediction, digits=3)
+            # print(a)
             # confusion matrix
             conf_mat = metrics.confusion_matrix(leave, prediction)
             conf_matrix += conf_mat
-        print(conf_matrix)
         for i, row in enumerate(conf_matrix):
             fp = 0
             tp = 0
@@ -97,25 +97,25 @@ def leave_one_participant_out(initial_theta, observations, type):
     for g in groups:
         plt.plot(labels, precisions[g], label=("%s" % g))
     plt.xlabel("patterns")
-    plt.ylabel("average precision")
+    plt.ylabel("Precision")
     plt.ylim(0, 1)
-    plt.legend(loc="lower right")
+    plt.legend(loc="upper right")
     plt.figure()
     for g in groups:
         plt.plot(labels, recalls[g], label="%s" % g)
     plt.xlabel("patterns")
-    plt.ylabel("average recall")
-    plt.legend(loc="lower right")
+    plt.ylabel("Recall")
+    plt.legend(loc="upper right")
     plt.ylim(0, 1)
     plt.figure()
     for g in groups:
         plt.plot(labels, accuracies[g], label="%s" % g)
     plt.xlabel("patterns")
-    plt.ylabel("average accuracy")
+    plt.ylabel("Accuracy")
     plt.legend(loc="lower right")
     plt.ylim(0, 1)
 
-    plt.show()
+    # plt.show()
 
 
 
@@ -164,8 +164,7 @@ def leave_one_experiment_out(initial_theta, observations, type):
                                      trained_parameters[1],
                                      trained_parameters[2])
             # Calculate the G-test statistic.
-            result = calculate_g_2(trained_parameters, test_set, type)
-            g_2 += result
+            g_2 += calculate_g_2(trained_parameters, test_set, type)
             # Calculate Cosine similarity
             distribution = [x / sum(test_set) for x in test_set]
             dot_product = 0
@@ -178,7 +177,6 @@ def leave_one_experiment_out(initial_theta, observations, type):
             cos_sim += dot_product / (magnitude1 * magnitude2)
             # Calculate RMSE
             rmse += metrics.mean_squared_error(probs, distribution, squared=False)
-
         g_2 = round(g_2 / 10, 3)
         cos_sim = round(cos_sim / 10, 3)
         rmse = round(rmse / 10, 3)
@@ -263,8 +261,8 @@ def metrics_function(experiment, probs, type):
 
     else:
         result[0] = "1000"
-        result[1] = "1001"
         result[2] = "1010"
+        result[1] = "1001"
         result[3] = "1011"
 
     for index, number in enumerate(experiment):
@@ -312,7 +310,7 @@ def bootstrap(initial_theta, observations, type):
             for i in range(length):
                 train_set.append([x for x in sample(data, 1)[0]])
             temp = train_set
-            # All other samples not be chosen is in the train set.
+            # All other samples not be chosen is in the test set.
             for train in train_set:
                 i = temp.index(train)
                 test_set = temp[:i - 1] + temp[i:]
@@ -333,7 +331,6 @@ def bootstrap(initial_theta, observations, type):
             # Computing g2
             for test in test_set:
                 mean_of_g_2 += calculate_g_2(trained_parameters, test, type)
-                mean_of_g_2 = round(mean_of_g_2, 3)
             # Compute rmse and Cosine Similarity
             for test in test_set:
                 distribution = [x / sum(test) for x in test]
@@ -346,11 +343,12 @@ def bootstrap(initial_theta, observations, type):
                 magnitude2 = math.sqrt(sum([i**2 for i in distribution]))
                 cos += dot_product / (magnitude1 * magnitude2)
                 root_mean_squared_error += metrics.mean_squared_error(probs, distribution, squared=False)
-        root_mean_squared_error = round(root_mean_squared_error / test_num, 3)
-        cos = round(cos / test_num, 3)
+        root_mean_squared_error = root_mean_squared_error / test_num
+        cos = cos / test_num
+        mean_of_g_2 = mean_of_g_2 / test_num
         rmse[group] = round(root_mean_squared_error, 3)
         cos_sim[group] = round(cos, 3)
-        g_2[group] = round(mean_of_g_2 / test_num, 3)
+        g_2[group] = round(mean_of_g_2, 3)
 
     return g_2, cos_sim, rmse
 
@@ -482,7 +480,7 @@ optional arguments:
         observations = pd.read_excel(file)
         obs["abstract"] = observations[observations["Content"] == "abstract"]
         obs["deontic"] = observations[observations["Content"] == "deontic"]
-        obs["generalization"] = observations[observations["Content"] == "generalization"]
+        obs["everyday"] = observations[observations["Content"] == "generalization"]
         for key, value in obs.items():
             obs[key] = value.iloc[:, -16:].astype('int') + 1
             obs[key] = obs[key].values.tolist()
@@ -491,7 +489,7 @@ optional arguments:
         observations = pd.read_excel(file)
         obs["abstract"] = observations[observations["Content"] == "abstract"]
         obs["deontic"] = observations[observations["Content"] == "deontic"]
-        obs["generalization"] = observations[observations["Content"] == "generalization"]
+        obs["everyday"] = observations[observations["Content"] == "generalization"]
         for key, value in obs.items():
             obs[key] = value.iloc[:, -5:-1].astype('int') + 1
             obs[key] = obs[key].values.tolist()
@@ -502,23 +500,23 @@ optional arguments:
     plt.figure()
     plt.plot(groups, list(g_2_loo.values()), label="loo-g2")
     plt.plot(groups, list(g_2_bootstrap.values()), label="bootstrap-g2")
-    plt.xlabel("groups")
-    plt.ylabel("G test statistic")
+    plt.xlabel("Generalizations")
+    plt.ylabel("G-test Statistic")
     plt.ylim(0, 400)
     plt.legend(loc="upper right")
     plt.figure()
     plt.plot(groups, list(cos_min_loo.values()), label="loo-cosine similarity")
     plt.plot(groups, list(cos_min_bootstrap.values()), label="bootstrap-cosine similarity")
-    plt.xlabel("groups")
-    plt.ylabel("cosine similarity")
+    plt.xlabel("Generalizations")
+    plt.ylabel("Cosine Similarity")
     plt.ylim(0, 1)
     plt.legend(loc="lower right")
     plt.figure()
     plt.plot(groups, list(rmse_loo.values()), label="loo-rmse")
     plt.plot(groups, list(rmse_bootstrap.values()), label="bootstrap-rmse")
-    plt.xlabel("groups")
+    plt.xlabel("Generalizations")
     plt.ylabel("RMSE")
     plt.ylim(0, 0.5)
     plt.legend(loc="lower right")
 
-    # plt.show()
+    plt.show()
