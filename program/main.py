@@ -3,7 +3,11 @@ import random
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
+import matplotlib.pylab as pl
 from sklearn import metrics
+from sklearn.cluster import KMeans
+from sklearn.cluster import MeanShift
+from sklearn.cluster import DBSCAN
 from sklearn.metrics.pairwise import cosine_similarity
 import math
 from random import sample
@@ -115,76 +119,129 @@ def leave_one_participant_out(initial_theta, observations, type):
     plt.legend(loc="lower right")
     plt.ylim(0, 1)
 
-    # plt.show()
+    plt.show()
 
 
 
-def leave_one_experiment_out(initial_theta, observations, type):
+def leave_one_experiment_out(initial_theta, observations, type, param=None):
     # Leave one experiment out
-    g_tests = {}
     cos = {}
     root_mean_squared_error = {}
+    overall_cos_sim = 0
+    overall_rmse = 0
     for group, data in observations.items():
-        g_2 = 0
         cos_sim = 0
         rmse = 0
-        scores = {}
-        for i, observation in enumerate(data):
-            score = 0
-            leave_one = data[i]
-            others = data[:i] + data[i + 1:]
-            for experiment in others:
-                score += similarity(leave_one, experiment)
-            scores[i] = score
+        if (type == '-m' and group != 'deontic') or (type == '-i' and group == 'deontic'):
+            scores = {}
+            for i, observation in enumerate(data):
+                score = 0
+                leave_one = data[i]
+                others = data[:i] + data[i + 1:]
+                for experiment in others:
+                    score += similarity(leave_one, experiment)
+                scores[i] = score
 
-        # Select 10 experiments with the highest similarity
-        score_list = sorted(list(scores.values()), reverse=True)
-        chosen_scores = score_list[:10]
-        chosen_expers = []
-        for s in chosen_scores:
-            for key, value in scores.items():
-                if value == s:
-                    chosen_expers.append(key)
+            # Select 10 experiments with the highest similarity
+            score_list = sorted(list(scores.values()), reverse=True)
+            chosen_scores = score_list[:10]
+            chosen_expers = []
+            for s in chosen_scores:
+                for key, value in scores.items():
+                    if value == s:
+                        chosen_expers.append(key)
+            for i in chosen_expers:
+                probs_list = []
+                # Select one sample as the test set.
+                test_set = data[i]
+                # Others is regarded as the train set.
+                train_set = data[:i - 1] + data[i:]
+                # Training
+                theory = em_algo(initial_theta, train_set)
+                trained_parameters = theory.run(param)
+                if type == "-i":
+                    probs = inference_model(
+                            trained_parameters[0], trained_parameters[1],
+                            trained_parameters[2], trained_parameters[3],
+                            trained_parameters[4])
+                else:
+                    probs = model_theory(trained_parameters[0],
+                                         trained_parameters[1],
+                                         trained_parameters[2])
+                # Calculate Cosine similarity
+                distribution = [x / sum(test_set) for x in test_set]
+                dot_product = 0
+                for index in range(len(probs)):
+                    dot_product += probs[index] * distribution[index]
 
-        for i in chosen_expers:
-            # Select one sample as the test set.
-            test_set = data[i]
-            # Others is regarded as the train set.
-            train_set = data[:i - 1] + data[i:]
-            # Training
-            theory = em_algo(initial_theta, train_set)
-            trained_parameters = theory.run()
-            if type == "-i":
-                probs = inference_model(
-                    trained_parameters[0], trained_parameters[1],
-                    trained_parameters[2], trained_parameters[3],
-                    trained_parameters[4])
-            else:
-                probs = model_theory(trained_parameters[0],
-                                     trained_parameters[1],
-                                     trained_parameters[2])
-            # Calculate the G-test statistic.
-            g_2 += calculate_g_2(trained_parameters, test_set, type)
-            # Calculate Cosine similarity
-            distribution = [x / sum(test_set) for x in test_set]
-            dot_product = 0
-            for i in range(len(probs)):
-                dot_product += probs[i] * distribution[i]
+                # Calculate the magnitude of the experiment
+                magnitude1 = math.sqrt(sum([x**2 for x in probs]))
+                magnitude2 = math.sqrt(sum([x**2 for x in distribution]))
+                cos_sim += dot_product / (magnitude1 * magnitude2)
+                # Calculate RMSE
+                rmse += metrics.mean_squared_error(probs, distribution, squared=False)
+            cos_sim = round(cos_sim / 10, 3)
+            rmse = round(rmse / 10, 3)
+            cos[group] = cos_sim
+            root_mean_squared_error[group] = rmse
+        else:
+            new_data = []
+            for value in data:
+                v = []
+                for i in value:
+                    v.append(i / sum(value))
+                new_data.append(v)
+            kmeans = KMeans(n_clusters=22, random_state=0).fit(new_data)
+            #mean_shift = MeanShift(bandwidth=40).fit(data)
+            dict = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [], 8: [], 9: [], 10: [], 11: [], 12: [], 13: [], 14: [], 15: [], 16: [], 17: [], 18: [], 19: [], 20: [], 21: []}
+            labels = list(kmeans.labels_)
+            for i, label in enumerate(labels):
+                dict[label].append(data[i])
+            #dict = {}
+            #labels = mean_shift.labels_
+            #for i, label in enumerate(labels):
+            #    if label in dict:
+            #        dict[label].append(data[i])
+            #    else:
+            #        dict[label] = []
+            for chosen_expers in list(dict.values()):
+                for i, exper in enumerate(chosen_expers):
+                    # Select one sample as the test set.
+                    test_set = exper
+                    # Others is regarded as the train set.
+                    train_set = chosen_expers[:i - 1] + chosen_expers[i:]
+                    # Training
+                    theory = em_algo(initial_theta, train_set)
+                    trained_parameters = theory.run(param)
+                    if type == "-i":
+                        probs = inference_model(
+                            trained_parameters[0], trained_parameters[1],
+                            trained_parameters[2], trained_parameters[3],
+                            trained_parameters[4])
+                    else:
+                        probs = model_theory(trained_parameters[0],
+                                             trained_parameters[1],
+                                             trained_parameters[2])
+                    # Calculate Cosine similarity
+                    distribution = [x / sum(test_set) for x in test_set]
+                    dot_product = 0
+                    for index in range(len(probs)):
+                        dot_product += probs[index] * distribution[index]
 
-            # Calculate the magnitude of the experiment
-            magnitude1 = math.sqrt(sum([i**2 for i in probs]))
-            magnitude2 = math.sqrt(sum([i**2 for i in distribution]))
-            cos_sim += dot_product / (magnitude1 * magnitude2)
-            # Calculate RMSE
-            rmse += metrics.mean_squared_error(probs, distribution, squared=False)
-        g_2 = round(g_2 / 10, 3)
-        cos_sim = round(cos_sim / 10, 3)
-        rmse = round(rmse / 10, 3)
-        g_tests[group] = g_2
-        cos[group] = cos_sim
-        root_mean_squared_error[group] = rmse
+                    # Calculate the magnitude of the experiment
+                    magnitude1 = math.sqrt(sum([x**2 for x in probs]))
+                    magnitude2 = math.sqrt(sum([x**2 for x in distribution]))
+                    cos_sim += dot_product / (magnitude1 * magnitude2)
+                    # Calculate RMSE
+                    rmse += metrics.mean_squared_error(probs, distribution, squared=False)
+            cos_sim = round(cos_sim / len(data), 3)
+            rmse = round(rmse / len(data), 3)
+            cos[group] = cos_sim
+            root_mean_squared_error[group] = rmse
+    #print(cos)
+    print(root_mean_squared_error)
 
-    return g_tests, cos, root_mean_squared_error
+    return cos, root_mean_squared_error
 
 
 
@@ -293,7 +350,6 @@ def bootstrap(initial_theta, observations, type):
         g_2(dictionary): A dictionary contains the trained parameters(keys) and
         the goodness-of-fit(values) of that.
     """
-    g_2 = {}
     rmse = {}
     cos_sim = {}
     # Choose the training samples with replacements
@@ -302,7 +358,6 @@ def bootstrap(initial_theta, observations, type):
         test_num = 0
         root_mean_squared_error = 0
         cos = 0
-        mean_of_g_2 = 0
         while n < 10:
             n += 1
             train_set = []
@@ -328,9 +383,6 @@ def bootstrap(initial_theta, observations, type):
                 probs = model_theory(trained_parameters[0],
                                      trained_parameters[1],
                                      trained_parameters[2])
-            # Computing g2
-            for test in test_set:
-                mean_of_g_2 += calculate_g_2(trained_parameters, test, type)
             # Compute rmse and Cosine Similarity
             for test in test_set:
                 distribution = [x / sum(test) for x in test]
@@ -345,38 +397,10 @@ def bootstrap(initial_theta, observations, type):
                 root_mean_squared_error += metrics.mean_squared_error(probs, distribution, squared=False)
         root_mean_squared_error = root_mean_squared_error / test_num
         cos = cos / test_num
-        mean_of_g_2 = mean_of_g_2 / test_num
         rmse[group] = round(root_mean_squared_error, 3)
         cos_sim[group] = round(cos, 3)
-        g_2[group] = round(mean_of_g_2, 3)
 
-    return g_2, cos_sim, rmse
-
-
-
-def calculate_g_2(params, test, type):
-    """
-    Calculate the goodness-of-fit of a model using samples in the test set.
-
-    Args:
-        params(list): the trained parameters
-        test(list): the test set
-        type(string): "-i" means the inference model "-m" means the model theory
-    """
-    total = sum(test)
-    distribution = [x / total for x in test]
-    if type == "-i":
-        new_distribution = inference_model(
-            params[0], params[1], params[2], params[3], params[4])
-    elif type == "-m":
-        new_distribution = model_theory(params[0], params[1], params[2])
-
-    g = 0
-    for (i, j) in enumerate(new_distribution):
-        if j != 0 and test[i] != 0:
-            g += 2 * test[i] * math.log(test[i] / (total * j))
-
-    return g
+    return cos_sim, rmse
 
 
 def inference_model(c, d, x, s, i):
@@ -481,6 +505,7 @@ optional arguments:
         obs["abstract"] = observations[observations["Content"] == "abstract"]
         obs["deontic"] = observations[observations["Content"] == "deontic"]
         obs["everyday"] = observations[observations["Content"] == "generalization"]
+        #obs["overall"] = observations
         for key, value in obs.items():
             obs[key] = value.iloc[:, -16:].astype('int') + 1
             obs[key] = obs[key].values.tolist()
@@ -490,28 +515,77 @@ optional arguments:
         obs["abstract"] = observations[observations["Content"] == "abstract"]
         obs["deontic"] = observations[observations["Content"] == "deontic"]
         obs["everyday"] = observations[observations["Content"] == "generalization"]
+        #obs["overall"] = observations
         for key, value in obs.items():
             obs[key] = value.iloc[:, -5:-1].astype('int') + 1
             obs[key] = obs[key].values.tolist()
     leave_one_participant_out(initial_theta, obs, sys.argv[1])
-    g_2_loo, cos_min_loo, rmse_loo = leave_one_experiment_out(initial_theta, obs, sys.argv[1])
-    g_2_bootstrap, cos_min_bootstrap, rmse_bootstrap = bootstrap(initial_theta, obs, sys.argv[1])
-    groups = list(g_2_loo.keys())
+    """
+    p_i = ['c', '-c', 'd', '-d', 'x', '-x', 's', '-s', 'i', '-i']
+    p_m = ['c', '-c', 'e', '-e', 'f', '-f']
+    groups = ['abstract', 'deontic', 'everyday', 'overall']
     plt.figure()
-    plt.plot(groups, list(g_2_loo.values()), label="loo-g2")
-    plt.plot(groups, list(g_2_bootstrap.values()), label="bootstrap-g2")
-    plt.xlabel("Generalizations")
-    plt.ylabel("G-test Statistic")
-    plt.ylim(0, 400)
-    plt.legend(loc="upper right")
-    plt.figure()
-    plt.plot(groups, list(cos_min_loo.values()), label="loo-cosine similarity")
-    plt.plot(groups, list(cos_min_bootstrap.values()), label="bootstrap-cosine similarity")
-    plt.xlabel("Generalizations")
-    plt.ylabel("Cosine Similarity")
-    plt.ylim(0, 1)
-    plt.legend(loc="lower right")
-    plt.figure()
+    if sys.argv[1] == '-i':
+        p_list = p_i
+        n = 11
+    else:
+        p_list = p_m
+        n = 7
+    colors = pl.cm.jet(np.linspace(0,1090,n))
+    for i, p in enumerate(p_list):
+        new_theta = []
+        for element in initial_theta:
+            new_theta.append(element)
+        j = i // 2
+        new_theta[j] = 0
+        if p == 'e':
+            new_theta[2] = 0
+        cos_min_loo, rmse_loo = leave_one_experiment_out(initial_theta, obs, sys.argv[1], p)
+        if sys.argv[1] == '-i':
+            if p == 'c':
+                label = "conditional"
+            elif p == '-c':
+                label = "biconditional"
+            elif p == 'd':
+                label = "forward"
+            elif p == '-d':
+                label = "backward"
+            elif p == 'x':
+                label = "bidirectional"
+            elif p == '-x':
+                label = "case distinction"
+            elif p == 's':
+                label = "sufficient"
+            elif p == '-s':
+                label = "necessary"
+            elif p == 'i':
+                label = "irreversible"
+            elif p == '-i':
+                label = "reversible"
+        else:
+            if p == 'c':
+                label = "scan conversely"
+            elif p == '-c':
+                label = "scan from p to q"
+            elif p == 'e':
+                label = "partial insight"
+            elif p == '-e':
+                label = "No insight"
+            elif p == 'f':
+                label = "Complete insight"
+            elif p == '-f':
+                label = "No further insight"
+        plt.plot(groups, list(cos_min_loo.values()), label=label, color=colors[i])
+    """
+    cos_min_loo, rmse_loo = leave_one_experiment_out(initial_theta, obs, sys.argv[1])
+    #cos_min_bootstrap, rmse_bootstrap = bootstrap(initial_theta, obs, sys.argv[1])
+    plt.plot(groups, list(cos_min_loo.values()), label="baseline", color=colors[-1])
+    #plt.plot(groups, list(cos_min_bootstrap.values()), label="bootstrap-cosine similarity")
+    #plt.xlabel("Generalizations")
+    #plt.ylabel("Cosine Similarity")
+    #plt.ylim(0, 1)
+    #plt.legend(loc="lower right")
+    #plt.figure()
     plt.plot(groups, list(rmse_loo.values()), label="loo-rmse")
     plt.plot(groups, list(rmse_bootstrap.values()), label="bootstrap-rmse")
     plt.xlabel("Generalizations")
@@ -519,4 +593,4 @@ optional arguments:
     plt.ylim(0, 0.5)
     plt.legend(loc="lower right")
 
-    plt.show()
+    #plt.show()
